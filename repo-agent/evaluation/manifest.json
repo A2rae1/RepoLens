@@ -1,0 +1,15 @@
+{
+  "count": 80,
+  "source": {
+    "repo": "https://github.com/pallets/click",
+    "tag": "8.1.8",
+    "commit": "934813e4d421071a1b3db3973c02fe2721359a6e",
+    "snapshot": "44a5fa9b3473a9891ceee09bd19c06acbba34d927657905f7280860d838f0633",
+    "provenance": "Public upstream repository; retrieved 2026-11-05",
+    "license": "BSD-3-Clause (verify snapshot LICENSE.txt)",
+    "purpose": "Pinned real-repository evidence benchmark"
+  },
+  "generated": "2026-11-05",
+  "annotation": "AI-authored, source/contract-grounded; not external or independent human benchmark",
+  "split": "64 dev /16 holdout by deterministic rule; development holdout, not a claim of blinded research evaluation"
+}

@@ -1,0 +1,29 @@
+[project]
+name = "repo-research-agent"
+version = "0.1.0"
+description = "Version-pinned open source research and approved reproduction agent"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi>=0.115,<1", "uvicorn>=0.34,<1", "httpx>=0.28,<1",
+  "pydantic-settings>=2.8,<3", "langgraph>=1,<2",
+  "langgraph-checkpoint-sqlite>=3,<4", "langgraph-checkpoint-postgres>=3,<4",
+  "psycopg[binary,pool]>=3.2,<4", "aiosqlite>=0.21,<1",
+  "elasticsearch[async]>=8.17,<9", "redis>=5.2,<7", "boto3>=1.37,<2",
+  "mcp>=1.9,<2", "prometheus-client>=0.21,<1",
+  "opentelemetry-api>=1.30,<2", "opentelemetry-sdk>=1.30,<2",
+  "opentelemetry-exporter-otlp-proto-http>=1.30,<2", "truststore>=0.10,<1"
+]
+[project.optional-dependencies]
+embedding = ["fastembed>=0.7,<1"]
+[dependency-groups]
+dev = ["pytest>=8.3,<10", "pytest-asyncio>=0.25,<2", "ruff>=0.11,<1"]
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+pythonpath = ["src"]
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

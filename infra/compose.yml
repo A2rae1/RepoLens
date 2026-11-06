@@ -1,0 +1,52 @@
+name: repolens-services
+services:
+  postgres:
+    image: postgres:17.4-alpine
+    environment:
+      POSTGRES_USER: repoagent
+      POSTGRES_PASSWORD: ${AGENT_CHECKPOINT_PASSWORD:?Run init-local first}
+      POSTGRES_DB: repoagent
+    ports:
+    - 127.0.0.1:15432:5432
+    volumes:
+    - agent_postgres:/var/lib/postgresql/data
+    mem_limit: 256m
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -U repoagent
+      interval: 5s
+      retries: 30
+  elasticsearch:
+    image: elasticsearch:8.19.23
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: 'false'
+      xpack.ml.enabled: 'false'
+      node.store.allow_mmap: 'false'
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    ports:
+    - 127.0.0.1:19200:9200
+    volumes:
+    - agent_search:/usr/share/elasticsearch/data
+    mem_limit: 1200m
+  objectstore:
+    image: rustfs/rustfs:1.0.4
+    command: /data
+    environment:
+      RUSTFS_ACCESS_KEY: repoagent
+      RUSTFS_SECRET_KEY: ${AGENT_OBJECT_PASSWORD:?Run init-local first}
+      RUSTFS_ADDRESS: :9000
+      RUSTFS_CONSOLE_ADDRESS: :9001
+      RUSTFS_CONSOLE_ENABLE: 'true'
+      RUSTFS_OBS_LOGGER_LEVEL: warn
+    ports:
+    - 127.0.0.1:19000:9000
+    - 127.0.0.1:19001:9001
+    volumes:
+    - agent_objects:/data
+    mem_limit: 512m
+volumes:
+  agent_postgres: null
+  agent_search: null
+  agent_objects: null

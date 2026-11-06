@@ -1,0 +1,35 @@
+services:
+  repo-agent:
+    image: repolens:local
+    init: true
+    stop_grace_period: 30s
+    env_file: ${REPOLENS_ROOT:?Set RepoLens checkout path}/repo-agent/.env
+    environment:
+      DATA_DIR: /app/.local
+      CONTROL_URL: http://event-app:8090
+      AGENT_INTERNAL_SECRET: ${AGENT_INTERNAL_SECRET}
+      CHECKPOINT_URL: postgresql://repoagent:${AGENT_CHECKPOINT_PASSWORD}@postgres:5432/repoagent
+      OBJECT_URL: http://objectstore:9000
+      OBJECT_SECRET_KEY: ${AGENT_OBJECT_PASSWORD}
+      OBJECT_ENABLED: 'true'
+      SEARCH_BACKEND: fts
+      EXECUTOR_ENABLED: 'true'
+      EXECUTOR_WORK_DIR: /runner-work
+      EXECUTOR_VOLUME: internship-projects_runner_work
+    volumes:
+    - ${REPOLENS_ROOT}/repo-agent/.local:/app/.local
+    - runner_work:/runner-work
+    - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+    - 127.0.0.1:8092:8092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      objectstore:
+        condition: service_started
+    mem_limit: 320m
+    cpus: 1
+    restart: on-failure:3
+volumes:
+  runner_work:
+    name: internship-projects_runner_work

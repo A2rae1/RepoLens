@@ -1,0 +1,41 @@
+# Private local runtime data, including the active MySQL data directory.
+.local/
+
+# Local environments, build output and editors.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+target/
+out/
+build/
+*.class
+.idea/
+*.iml
+.vscode/
+*.log
+node_modules/
+.playwright-cli/
+
+# Credentials and local-only data. Public .env.example must use placeholders.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.sqlite
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+
+# Local reports, downloads, and personal documents are never published.
+output/
+tmp/
+*.hprof
+*.dump
+*.zip
+*.pdf
