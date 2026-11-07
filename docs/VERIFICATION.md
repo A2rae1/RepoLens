@@ -1,3 +1,5 @@
+> Current repair validation: [2026-11-07 closeout](FINAL_VERIFICATION_2026-11-07.md). Earlier results below retain their original version/scope.
+
 # Verification scope
 
 Baseline snapshot: 2026-11-06. Local results describe a development environment, not production capacity or learner proficiency. Raw private runtime databases, credentials, traces and machine-specific logs are intentionally excluded from the public repository.

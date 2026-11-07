@@ -2,6 +2,7 @@ import asyncio
 import os
 import sys
 import uuid
+from pathlib import Path
 
 import pytest
 from test_graph import ApprovalModel, initial
@@ -26,6 +27,9 @@ async def test_real_postgres_interrupt_survives_connection_and_process_restart(e
         result = await graph.ainvoke(initial(snapshot), {"configurable": {"thread_id": thread}})
         assert result["__interrupt__"]
         store.decide("job", result["pending_approval"], False)
+    child_env = dict(os.environ)
+    source = str(Path(__file__).resolve().parents[1] / "src")
+    child_env["PYTHONPATH"] = os.pathsep.join(filter(None, [source, child_env.get("PYTHONPATH")]))
     child = await asyncio.create_subprocess_exec(
         sys.executable,
         "tests/checkpoint_child.py",
@@ -33,6 +37,7 @@ async def test_real_postgres_interrupt_survives_connection_and_process_restart(e
         thread,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=child_env,
     )
     stdout, stderr = await asyncio.wait_for(child.communicate(), 30)
     # Never dump a connection string from driver errors into the test output.

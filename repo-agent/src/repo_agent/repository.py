@@ -31,6 +31,15 @@ TEXT_SUFFIXES = {
 }
 
 
+def java_declaration_candidates(text: str):
+    """Lexical candidates only: never advertise regex matches as full AST definitions."""
+    literals = r'//[^\r\n]*|/\*[\s\S]*?\*/|"""[\s\S]*?"""|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\''
+    scrubbed = re.sub(literals, lambda m: re.sub(r"[^\n]", " ", m[0]), text)
+    for match in re.finditer(r"\b(class|interface|record|enum)\s+([A-Za-z_$][\w$]*)", scrubbed):
+        line = scrubbed[: match.start()].count("\n") + 1
+        yield match[2], "java_" + match[1] + "_candidate", line, line
+
+
 def canonical(repo: str, commit: str) -> tuple[str, str]:
     if not REPO.fullmatch(repo) or not SHA.fullmatch(commit):
         raise ValueError("Only public github.com repositories and full commit SHAs are supported")
@@ -131,12 +140,13 @@ class Repository:
     def index_symbols(self, snapshot: str):
         with self.store.connect() as db:
             if db.execute(
-                "SELECT 1 FROM symbol_index_versions WHERE snapshot=? AND version=1", (snapshot,)
+                "SELECT 1 FROM symbol_index_versions WHERE snapshot=? AND version=2", (snapshot,)
             ).fetchone():
                 return
             files = db.execute(
                 "SELECT path,content FROM source_files WHERE snapshot=?", (snapshot,)
             ).fetchall()
+            db.execute("DELETE FROM symbols WHERE snapshot=?", (snapshot,))
             for file in files:
                 if file["path"].endswith(".py"):
                     try:
@@ -157,21 +167,14 @@ class Repository:
                         continue
                 elif file["path"].endswith(".java"):
                     symbols = [
-                        (
-                            snapshot,
-                            file["path"],
-                            m.group(2),
-                            m.group(1),
-                            file["content"][: m.start()].count("\n") + 1,
-                            file["content"][: m.start()].count("\n") + 80,
-                        )
-                        for m in re.finditer(r"\b(class|interface|record|enum)\s+(\w+)", file["content"])
+                        (snapshot, file["path"], name, kind, start, end)
+                        for name, kind, start, end in java_declaration_candidates(file["content"])
                     ]
                 else:
                     continue
                 db.executemany("INSERT OR IGNORE INTO symbols VALUES(?,?,?,?,?,?)", symbols)
             db.execute(
-                "INSERT INTO symbol_index_versions VALUES(?,1) ON CONFLICT(snapshot) DO UPDATE SET version=1",
+                "INSERT INTO symbol_index_versions VALUES(?,2) ON CONFLICT(snapshot) DO UPDATE SET version=2",
                 (snapshot,),
             )
 
@@ -199,7 +202,11 @@ class Repository:
                 "SELECT * FROM symbols WHERE snapshot=? AND name=? ORDER BY path,start_line LIMIT 5",
                 (snapshot, name),
             ).fetchall()
-        return [dict(row) for row in found]
+        return [
+            dict(row)
+            | {"precision": "declaration_candidate" if row["kind"].startswith("java_") else "exact_ast"}
+            for row in found
+        ]
 
     async def fetch(self, owner: str, workspace: str, repo: str, commit: str) -> dict:
         with operation("repo.fetch", **{"repo.url": repo, "repo.commit": commit}):

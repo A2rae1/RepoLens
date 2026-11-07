@@ -19,9 +19,15 @@ parent/
 
 1. Build EventFulfill after Java verification: `./scripts/apps-build.ps1`.
 2. In RepoLens: `./scripts/init-local.ps1`, `./scripts/executor-build.ps1`, `./scripts/apps-build.ps1`.
-3. Stop native application processes first, then run `./scripts/integration.ps1 -EventFulfillRoot ../EventFulfill` in RepoLens. It combines both Compose definitions under the existing dedicated internship-projects project name and initializes only that application's schema.
+3. Stop native application processes first, then run `./scripts/integration.ps1 -EventFulfillRoot ../EventFulfill` in RepoLens. It combines both Compose definitions under the default dedicated internship-projects project name and initializes only that application's schema. It waits for both applications to become healthy. Use `-ProjectName your-local-name` to select a separate set of containers, data volumes and runner volume; host ports are still shared, so only one group can run at a time.
 4. Stop with the same command plus `-Stop`; data volumes are retained. Do not run multiple checkouts of this same application at once, or stack optional search/governance/K8s groups on a resource-constrained machine.
 
-The integration script creates an ignored `.local/integration.env` from the two generated local configurations; no credentials are included in Git. Model API keys stay in RepoLens/repo-agent/.env, with live calls disabled by default. Default CI checks each repository separately and does not start a paid model or full container deployment.
+The integration script creates an ignored `.local/integration-PROJECT.env` from the two generated local configurations; no credentials are included in Git. Model API keys stay in RepoLens/repo-agent/.env, with live calls disabled by default. Default CI checks each repository separately and does not start a paid model or full container deployment. An explicitly selected `-OverrideFile path/to/local.yml` can supply local acceptance settings; keep private overrides out of Git. Use the identical project name/override for stop commands. `agent-e2e.ps1 -RestartProbe` also accepts `-ProjectName` and restarts only that group's Agent.
 
-The split has independent source/test/configuration validation. Earlier real middleware/model/approval tests apply to the same underlying business implementation; they are not relabeled as a new paid end-to-end run of the two-checkout deployment.
+## Building in a constrained local environment
+
+`apps-build.ps1` reuses an existing immutable local runtime image only when its `uv.lock` and `pyproject.toml` hashes match this checkout exactly. It removes the previous source before copying the new source. `-RefreshDependencies` forces the original pinned dependency build; `-ClassicBuilder` selects the classic local builder when BuildKit bootstrap is unavailable. Failed dependency checksums are never bypassed. Local reuse is a code rebuild, not proof that a clean dependency download succeeded.
+
+All worker processes for the same deployment must share the same local DATA_DIR. The per-job OS file lock prevents simultaneous graph writers on the tested single-host/shared-bind deployment; separate data directories, cross-host workers and distributed filesystems are not supported by that lock. Do not delete its lock files while workers run.
+
+See [current verification](FINAL_VERIFICATION_2026-11-07.md) for the rebuilt two-checkout deployment and its limits. Historical quality/performance measurements remain tied to their original versions.

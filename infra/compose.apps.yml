@@ -15,7 +15,7 @@ services:
       SEARCH_BACKEND: fts
       EXECUTOR_ENABLED: 'true'
       EXECUTOR_WORK_DIR: /runner-work
-      EXECUTOR_VOLUME: internship-projects_runner_work
+      EXECUTOR_VOLUME: ${REPOLENS_RUNNER_VOLUME:-internship-projects_runner_work}
     volumes:
     - ${REPOLENS_ROOT}/repo-agent/.local:/app/.local
     - runner_work:/runner-work
@@ -32,4 +32,4 @@ services:
     restart: on-failure:3
 volumes:
   runner_work:
-    name: internship-projects_runner_work
+    name: ${REPOLENS_RUNNER_VOLUME:-internship-projects_runner_work}

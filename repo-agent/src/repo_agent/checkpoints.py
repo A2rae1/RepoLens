@@ -15,6 +15,8 @@ from contextlib import asynccontextmanager
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
+from .lifecycle import drain_issued
+
 
 class ThreadedPostgresSaver(PostgresSaver):
     def __init__(self, *args, **kwargs):
@@ -24,9 +26,14 @@ class ThreadedPostgresSaver(PostgresSaver):
 
     async def dispatch(self, function, *args, **kwargs):
         async with self._slots:
-            return await asyncio.get_running_loop().run_in_executor(
+            issued = asyncio.get_running_loop().run_in_executor(
                 self._pool, functools.partial(function, *args, **kwargs)
             )
+            try:
+                return await asyncio.shield(issued)
+            except asyncio.CancelledError:
+                await drain_issued(issued)
+                raise
 
     async def aget_tuple(self, config):
         return await self.dispatch(self.get_tuple, config)

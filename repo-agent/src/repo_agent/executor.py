@@ -44,7 +44,7 @@ class Executor:
             if image.get("tag") == settings.executor_image:
                 self.image_id = image["id"]
 
-    def plan(self, job: str, snapshot: str, recipe: str) -> dict:
+    def plan(self, job: str, snapshot: str, recipe: str, generation: int = 0) -> dict:
         if recipe not in RECIPES:
             raise ValueError("Recipe is not in the execution allowlist")
         return {
@@ -61,14 +61,17 @@ class Executor:
             "memory_mb": 256,
             "read_only_source": True,
             "warning": "Docker resource restrictions reduce risk; not a strong sandbox for hostile code.",
+            **({"generation": generation} if generation else {}),
         }
 
     async def run(self, owner: str, workspace: str, job: str, plan_hash: str) -> dict:
         approval = self.store.approval(job, plan_hash)
-        if approval["decision"] != "APPROVED" or approval["expires"] <= time.time():
-            raise PermissionError("Execution has not received an unexpired user approval")
+        if approval["decision"] != "APPROVED":
+            raise PermissionError("Execution has not received user approval")
         plan = json.loads(approval["plan"])
-        if plan["job"] != job or plan != self.plan(job, plan["snapshot"], plan["recipe"]):
+        if plan["job"] != job or plan != self.plan(
+            job, plan["snapshot"], plan["recipe"], plan.get("generation", 0)
+        ):
             raise PermissionError("Execution plan changed after approval")
         self.store.snapshot(plan["snapshot"], owner, workspace)
         if not self.settings.executor_enabled:
@@ -84,6 +87,10 @@ class Executor:
                     return json.loads(old["result"]) | {"reused": True}
                 # Crash after dispatch is ambiguous: don't silently run the same untrusted code twice.
                 return await recover_execution(self.settings, self.store, job, plan_hash, old["result"])
+            # Expiry prevents a new dispatch. It must not hide the recorded outcome
+            # of an already dispatched execution after a long worker outage.
+            if approval["expires"] <= time.time():
+                raise PermissionError("Execution approval expired before dispatch")
             source = db.execute(
                 "SELECT * FROM snapshot_archives WHERE snapshot=?", (plan["snapshot"],)
             ).fetchone()

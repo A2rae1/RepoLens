@@ -7,6 +7,7 @@ plan after restart; this is not user understanding/approval evidence.
 import asyncio
 import json
 import os
+import re
 import subprocess
 import time
 import uuid
@@ -19,6 +20,9 @@ async def main():
     java = "http://127.0.0.1:8090"
     agent = "http://127.0.0.1:8092"
     docker = str(Path(os.environ["LOCALAPPDATA"]) / "Programs/DockerDesktop/resources/bin/docker.exe")
+    project = os.environ.get("E2E_COMPOSE_PROJECT", "internship-projects")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,40}", project):
+        raise ValueError("Invalid explicit project name")
     async with httpx.AsyncClient(timeout=15) as client:
         response = await client.post(
             java + "/api/auth/login",
@@ -67,7 +71,7 @@ async def main():
 
         def restart():
             r = subprocess.run(
-                [docker, "restart", "--time", "20", "internship-projects-repo-agent-1"],
+                [docker, "restart", "--time", "20", project + "-repo-agent-1"],
                 capture_output=True,
                 timeout=45,
             )
@@ -97,7 +101,7 @@ async def main():
             headers=headers,
             json={"plan_hash": plan["plan_hash"], "approved": False},
         )
-        assert duplicate.status_code == 409
+        assert duplicate.status_code == 200 and duplicate.json()["accepted"]
         await wait(await api("GET", "/api/agent/jobs/" + job["id"]), "COMPLETED")
         report = await api("GET", f"/jobs/{job['id']}/report", python=True)
         runs = report["verification"]["local_executions"]
@@ -126,7 +130,7 @@ async def main():
             "checkpoint_backend": "real Postgres across container process restart",
             "events_preserved": True,
             "rejected_after_restart": "NOT_RUN/USER_REJECTED",
-            "duplicate_approval": 409,
+            "duplicate_approval": "200/idempotent same decision",
             "running_cancel_job": running["id"],
             "cancel_observed_seconds": round(time.monotonic() - started, 3),
             "cancelled_report": 404,

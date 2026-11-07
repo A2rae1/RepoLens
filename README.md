@@ -9,7 +9,7 @@ A Python Agent service that investigates a fixed GitHub commit, retrieves source
 ## Capabilities
 
 - Version-pinned snapshots, source citations, BM25/vector/hybrid retrieval comparisons and content/model cache reuse.
-- Persistent checkpoints, leases, cancellation and fenced updates; approval binds the plan, recipe, image identity and expiry.
+- Persistent checkpoints, leases, cancellation, generation-separated retries and Java completion fencing; approval binds the plan, recipe, image identity and expiry.
 - Non-root, read-only, network-disabled execution recipes with resource/output limits; this is not a strong sandbox for arbitrary malicious code.
 - Scoped Skills, MCP tools, isolated context, resumable S3 uploads, reports and an 80-case development evaluation set with documented limitations.
 
@@ -37,3 +37,7 @@ The Python API can start independently and exposes its health endpoint on 8092. 
 For container integration, build each repository's images and the runner, then use `./scripts/integration.ps1 -EventFulfillRoot ../EventFulfill`. See [integration setup](docs/INTEGRATION.md). Default retrieval is FTS; Elasticsearch/CPU embeddings are optional. Real model acceptance costs money and is separate from default CI.
 
 The evaluation set is AI-authored development material, not blind human evaluation. Simulated/local measurements do not imply production scale or universal repository reproduction. See [verification scope](docs/VERIFICATION.md) and [third-party notices](docs/THIRD_PARTY_NOTICES.md).
+
+## Review fixes
+
+See [reliability fixes](docs/REVIEW_FIXES_2026-11-06.md) for current-read transactions, durable approval delivery, generation-separated retries, evidence precision and versioned evaluation metrics. Rebuild old container images before using this source. See [2026-11-07 verification](docs/FINAL_VERIFICATION_2026-11-07.md) for the rebuilt two-checkout acceptance and remaining boundaries.

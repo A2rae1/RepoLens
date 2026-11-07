@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import hashlib
 import json
 import time
 from pathlib import Path
@@ -36,19 +37,33 @@ def summarize(root: Path):
     scored = [
         r
         for r in rows
-        if r.get("task_success") is not None and not r.get("requires_review") and "error" not in r
+        if "error" in r or (r.get("task_success") is not None and not r.get("requires_review"))
     ]
+    successful = sum(r.get("task_success") is True and "error" not in r for r in scored)
+    pending = len(rows) - len(scored)
     tool_rows = [r for r in rows if r.get("tool_selection_correct") is not None]
     calls = sum(r.get("tool_calls", 0) for r in rows)
     valid = sum(r.get("valid_tool_arguments", 0) for r in rows)
     retrieval = [r for r in rows if r.get("retrieval_recall_at_5") is not None]
     latencies = sorted(r["latency_ms"] for r in rows if "latency_ms" in r)
     summary = {
+        "metric_code_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        "raw_case_sha256": {
+            p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(root.glob("case-*.json"))
+        },
         "execution_errors": sum("error" in r for r in rows),
         "cases_completed": len(rows),
         "task_success_scored_cases": len(scored),
-        "task_success_rate": sum(r["task_success"] for r in scored) / len(scored) if scored else None,
-        "semantic_review_pending": sum(r.get("requires_review", False) for r in rows),
+        "metric_version": 2,
+        "task_success_rate": successful / len(rows) if rows and not pending else None,
+        "task_success_denominator": len(rows),
+        "task_successes_confirmed": successful,
+        "task_success_lower_bound": successful / len(rows) if rows else None,
+        "task_success_upper_bound": (successful + pending) / len(rows) if rows else None,
+        "scored_case_success_rate": successful / len(scored) if scored else None,
+        "execution_completion_rate": sum("error" not in r for r in rows) / len(rows) if rows else None,
+        "semantic_review_pending": sum(r.get("requires_review", False) and "error" not in r for r in rows),
+        "unscored_cases": pending,
         "tool_selection_scored_cases": len(tool_rows),
         "tool_selection_accuracy": sum(r["tool_selection_correct"] for r in tool_rows) / len(tool_rows)
         if tool_rows
@@ -63,10 +78,11 @@ def summarize(root: Path):
         "latency_p95_ms": latencies[min(len(latencies) - 1, int(len(latencies) * 0.95))]
         if latencies
         else None,
-        "metric_scope": "Version-pinned Click engineering regression; AI-authored source/contract labels. Unreviewed semantic cases excluded from task success.",
+        "metric_scope": "Version-pinned Click development regression. Every attempted case, including execution errors, is in the end-to-end denominator. Unreviewed cases remain pending: only bounds are reported until all cases are scored. scored_case_success_rate is a separate subset metric, not end-to-end success.",
         "raw_retrieval_scope": "SQLite FTS query field, not model query reformulation or vector retrieval.",
     }
-    (root / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    # Preserve historical summaries and raw cases; the new denominator has its own versioned output.
+    (root / "summary-v2.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     return summary
 
 

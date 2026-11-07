@@ -1,0 +1,5 @@
+# Code-only rebuild. The caller verifies both dependency files against this immutable base first.
+ARG DEPENDENCY_IMAGE
+FROM ${DEPENDENCY_IMAGE}
+RUN python -c "import shutil; shutil.rmtree('/app/src/repo_agent')"
+COPY src /app/src

@@ -83,8 +83,9 @@ def test_approval_and_memory_cannot_be_granted_by_model(evidence):
     key = store.propose("job", {"recipe": "python_ast"})
     assert store.approval("job", key)["decision"] is None
     store.decide("job", key, True)
+    store.decide("job", key, True)  # The same durable decision is idempotent.
     with pytest.raises(ValueError):
-        store.decide("job", key, True)
+        store.decide("job", key, False)  # A model/client cannot reverse that decision.
     with pytest.raises(PermissionError):
         store.preference("alice", "python", "3.12", confirmed=False)
     store.preference("alice", "python", "3.12", confirmed=True)

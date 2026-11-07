@@ -21,6 +21,7 @@ from .context import parent_summary
 from .control import Control
 from .executor import Executor
 from .graph import build_graph
+from .lifecycle import ApprovalRecovery, graph_config, invoke_checkpointed
 from .model import DeepSeekModel
 from .objects import Objects
 from .repository import Repository
@@ -29,6 +30,7 @@ from .settings import Settings
 from .store import Store
 from .tools import Tools
 from .uploads import uploads_router
+from .worker_lock import job_lock
 
 
 def create_app(settings: Settings | None = None, model=None) -> FastAPI:
@@ -36,6 +38,7 @@ def create_app(settings: Settings | None = None, model=None) -> FastAPI:
     cfg.prepare()
     store = Store(cfg.data_dir)
     control = Control(cfg)
+    approval_recovery = ApprovalRecovery(store, control)
     repository = Repository(store)
     executor = Executor(cfg, store)
     active: dict[str, asyncio.Task] = {}
@@ -89,6 +92,7 @@ def create_app(settings: Settings | None = None, model=None) -> FastAPI:
 
     app = FastAPI(title="RepoLens 仓库调研与复现Agent", version="0.1.0", lifespan=lifespan)
     app.state.store, app.state.repository, app.state.control = store, repository, control
+    app.state.approval_recovery = approval_recovery
 
     @app.middleware("http")
     async def trace_http(request: Request, call_next):
@@ -152,84 +156,95 @@ def create_app(settings: Settings | None = None, model=None) -> FastAPI:
 
     async def perform_attempt(job_id: str):
         async with semaphore:
-            try:
-                job = await control.internal(f"/{job_id}/claim", {})
-            except httpx.HTTPStatusError:
-                return  # Durable Java CAS chooses one execution attempt across workers.
-            token = job["leaseToken"]
-            keeper = asyncio.create_task(heartbeat(job_id, token, asyncio.current_task()))
-            config = {"configurable": {"thread_id": job_id}, "recursion_limit": 80}
-            try:
-                state = await app.state.graph.aget_state(config)
-                if state.next:
-                    graph_input = Command(resume={"resume": True}) if state.interrupts else None
-                elif state.values.get("answer"):
-                    # Outcome committed to checkpoint but Java response was lost: publish the stored result only.
-                    graph_input = None
-                else:
-                    snapshot = await repository.fetch(
-                        job["ownerId"], job["workspaceId"], job["repoUrl"], job["commitSha"]
-                    )
-                    if app.state.hybrid:
-                        await app.state.hybrid.index_snapshot(
-                            job["ownerId"], job["workspaceId"], snapshot["id"]
-                        )
-                    graph_input = {
-                        "job": job_id,
-                        "owner": job["ownerId"],
-                        "workspace": job["workspaceId"],
-                        "snapshot": snapshot["id"],
-                        "question": job["question"],
-                    }
-                    linkage = await control.internal(f"/{job_id}/parent")
-                    if linkage.get("parentJobId"):
-                        parent = await control.internal("/" + linkage["parentJobId"])
-                        previous = store.report(parent["id"], job["ownerId"])
-                        if (
-                            parent["ownerId"] != job["ownerId"]
-                            or parent["workspaceId"] != job["workspaceId"]
-                            or parent["commitSha"] != job["commitSha"]
-                        ):
-                            raise PermissionError("Parent context scope mismatch")
-                        if previous:
-                            graph_input["prior_context"] = parent_summary(parent["question"], previous)
-                            evidence = {}
-                            for citation in previous["citations"][:12]:
-                                for chunk in repository.read(
-                                    job["ownerId"],
-                                    job["workspaceId"],
-                                    snapshot["id"],
-                                    citation["path"],
-                                    citation["start_line"],
-                                    min(citation["end_line"], citation["start_line"] + 170),
-                                ):
-                                    evidence[chunk["id"]] = chunk
-                            graph_input["evidence"] = evidence
-                    store.event(
-                        job_id,
-                        "snapshot_ready",
-                        {"snapshot": snapshot["id"], "commit": snapshot["commit_sha"]},
-                    )
-                result = await app.state.graph.ainvoke(graph_input, config)
-                status = (
-                    "AWAITING_APPROVAL"
-                    if result.get("__interrupt__")
-                    else ("FAILED" if result.get("outcome") == "STEP_LIMIT" else "COMPLETED")
+            with job_lock(cfg.data_dir, job_id) as acquired:
+                if not acquired:
+                    return None  # Another live writer must finish/cancel before Java lease reclaim.
+                return await perform_owned_attempt(job_id)
+
+    async def perform_owned_attempt(job_id: str):
+        try:
+            job = await control.internal(f"/{job_id}/claim", {})
+        except httpx.HTTPStatusError:
+            return  # Durable Java CAS chooses one execution attempt across workers.
+        token = job["leaseToken"]
+        keeper = asyncio.create_task(heartbeat(job_id, token, asyncio.current_task()))
+        config = graph_config(job)
+        try:
+            state = await app.state.graph.aget_state(config)
+            if state.next:
+                graph_input = Command(resume={"resume": True}) if state.interrupts else None
+            elif state.values.get("answer"):
+                # Outcome committed to checkpoint but Java response was lost: publish the stored result only.
+                graph_input = None
+            else:
+                snapshot = await repository.fetch(
+                    job["ownerId"], job["workspaceId"], job["repoUrl"], job["commitSha"]
                 )
-                if status == "COMPLETED" and app.state.objects:
-                    try:
-                        await asyncio.to_thread(
-                            app.state.objects.artifact,
-                            job["ownerId"],
-                            job["workspaceId"],
-                            job_id,
-                            "report",
-                            store.report(job_id, job["ownerId"]),
-                        )
-                    except Exception as archive_error:
-                        # Report checkpoint is already durable. Object-store outage must not
-                        # turn completed research into failed work or repeat paid calls.
-                        store.event(job_id, "archive_pending", {"error": type(archive_error).__name__})
+                if app.state.hybrid:
+                    await app.state.hybrid.index_snapshot(job["ownerId"], job["workspaceId"], snapshot["id"])
+                graph_input = {
+                    "job": job_id,
+                    "owner": job["ownerId"],
+                    "workspace": job["workspaceId"],
+                    "snapshot": snapshot["id"],
+                    "question": job["question"],
+                    "generation": job.get("generation", 0),
+                }
+                linkage = await control.internal(f"/{job_id}/parent")
+                if linkage.get("parentJobId"):
+                    parent = await control.internal("/" + linkage["parentJobId"])
+                    previous = store.report(parent["id"], job["ownerId"])
+                    if (
+                        parent["ownerId"] != job["ownerId"]
+                        or parent["workspaceId"] != job["workspaceId"]
+                        or parent["commitSha"] != job["commitSha"]
+                    ):
+                        raise PermissionError("Parent context scope mismatch")
+                    if previous:
+                        graph_input["prior_context"] = parent_summary(parent["question"], previous)
+                        evidence = {}
+                        for citation in previous["citations"][:12]:
+                            for chunk in repository.read(
+                                job["ownerId"],
+                                job["workspaceId"],
+                                snapshot["id"],
+                                citation["path"],
+                                citation["start_line"],
+                                min(citation["end_line"], citation["start_line"] + 170),
+                            ):
+                                evidence[chunk["id"]] = chunk
+                        graph_input["evidence"] = evidence
+                store.event(
+                    job_id,
+                    "snapshot_ready",
+                    {"snapshot": snapshot["id"], "commit": snapshot["commit_sha"]},
+                )
+            if state.interrupts and not store.approval(job_id, state.values["pending_approval"])["decision"]:
+                # A crash before Java recorded AWAITING_APPROVAL must not resume
+                # an undecided interrupt or convert it into FAILED.
+                result = dict(state.values) | {"__interrupt__": state.interrupts}
+            else:
+                result = await invoke_checkpointed(app.state.graph, graph_input, config)
+            status = (
+                "AWAITING_APPROVAL"
+                if result.get("__interrupt__")
+                else ("FAILED" if result.get("outcome") == "STEP_LIMIT" else "COMPLETED")
+            )
+            if status == "COMPLETED" and app.state.objects:
+                try:
+                    await asyncio.to_thread(
+                        app.state.objects.artifact,
+                        job["ownerId"],
+                        job["workspaceId"],
+                        job_id,
+                        "report",
+                        store.report(job_id, job["ownerId"]),
+                    )
+                except Exception as archive_error:
+                    # Report checkpoint is already durable. Object-store outage must not
+                    # turn completed research into failed work or repeat paid calls.
+                    store.event(job_id, "archive_pending", {"error": type(archive_error).__name__})
+            try:
                 await control.internal(
                     f"/{job_id}/finish",
                     {
@@ -237,32 +252,40 @@ def create_app(settings: Settings | None = None, model=None) -> FastAPI:
                         "status": status,
                         "resultRef": f"/jobs/{job_id}/report",
                         "errorCode": "STEP_LIMIT" if status == "FAILED" else None,
+                        "approvalHash": result.get("pending_approval")
+                        if status == "AWAITING_APPROVAL"
+                        else None,
                     },
                 )
-                store.event(job_id, "job_status", {"status": status})
-                telemetry.JOBS.labels(status).inc()
-                return status
-            except asyncio.CancelledError:
-                store.event(job_id, "attempt_cancelled", {"attempt": job["attempt"]})
-                raise
-            except Exception as exc:
-                store.event(
-                    job_id,
-                    "attempt_failed",
-                    {"error": type(exc).__name__, "detail": str(exc).splitlines()[0][:150]},
+            except httpx.HTTPError:
+                # The graph outcome is durable. Leave RUNNING to expire and
+                # recover this generation instead of falsely marking it FAILED.
+                store.event(job_id, "finish_pending", {"status": status})
+                return None
+            store.event(job_id, "job_status", {"status": status})
+            telemetry.JOBS.labels(status).inc()
+            return status
+        except asyncio.CancelledError:
+            store.event(job_id, "attempt_cancelled", {"attempt": job["attempt"]})
+            raise
+        except Exception as exc:
+            store.event(
+                job_id,
+                "attempt_failed",
+                {"error": type(exc).__name__, "detail": str(exc).splitlines()[0][:150]},
+            )
+            try:
+                await control.internal(
+                    f"/{job_id}/finish",
+                    {"token": token, "status": "FAILED", "errorCode": type(exc).__name__},
                 )
-                try:
-                    await control.internal(
-                        f"/{job_id}/finish",
-                        {"token": token, "status": "FAILED", "errorCode": type(exc).__name__},
-                    )
-                    telemetry.JOBS.labels("FAILED").inc()
-                    return "FAILED"
-                except httpx.HTTPError:
-                    pass
-            finally:
-                keeper.cancel()
-                await asyncio.gather(keeper, return_exceptions=True)
+                telemetry.JOBS.labels("FAILED").inc()
+                return "FAILED"
+            except httpx.HTTPError:
+                pass
+        finally:
+            keeper.cancel()
+            await asyncio.gather(keeper, return_exceptions=True)
 
     async def perform(job_id: str):
         try:
@@ -299,6 +322,7 @@ def create_app(settings: Settings | None = None, model=None) -> FastAPI:
     async def recover():
         while True:
             try:
+                await approval_recovery.reconcile()
                 for job in await control.internal(""):
                     wake(job["id"])
             except (httpx.HTTPError, RuntimeError):
@@ -420,19 +444,70 @@ def create_app(settings: Settings | None = None, model=None) -> FastAPI:
     class Decision(BaseModel):
         plan_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
         approved: bool
+        approval_nonce: str = Field(default="", pattern=r"^(?:[a-f0-9]{32})?$")
+
+    def approval_view(row):
+        return {
+            "plan_hash": row["plan_hash"],
+            "plan": json.loads(row["plan"]),
+            "approval_nonce": row["nonce"],
+            "expires": row["expires"],
+            "expired": row["expires"] <= time.time(),
+            "decision": row["decision"],
+        }
+
+    async def approval_job(job, principal):
+        owned = await job_owner(job, principal)
+        if owned["status"] == "AWAITING_APPROVAL" and not owned.get("approvalHash"):
+            saved = await app.state.graph.aget_state(graph_config(owned))
+            key = saved.values.get("pending_approval")
+            if not saved.interrupts or not key:
+                raise HTTPException(409, "旧任务缺少审批检查点，请先取消后重新发起")
+            row = store.approval(job, key)
+            try:
+                owned = await control.internal(f"/{job}/bind-approval", {"planHash": key})
+            except httpx.HTTPError:
+                raise HTTPException(503, "审批状态同步暂不可用，请稍后重试") from None
+            if row["decision"]:
+                store.decide(job, key, row["decision"] == "APPROVED", row["nonce"], deliver=True)
+        return owned
+
+    @app.get("/jobs/{job}/approval")
+    async def current_approval(job: str, principal=Depends(auth)):
+        owned = await approval_job(job, principal)
+        if owned["status"] != "AWAITING_APPROVAL" or not owned.get("approvalHash"):
+            raise HTTPException(409, "任务未等待审批")
+        return approval_view(store.approval(job, owned["approvalHash"]))
+
+    class Renew(BaseModel):
+        plan_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @app.post("/jobs/{job}/approval/renew")
+    async def renew_approval(job: str, body: Renew, principal=Depends(auth)):
+        owned = await approval_job(job, principal)
+        if owned["status"] != "AWAITING_APPROVAL" or owned.get("approvalHash") != body.plan_hash:
+            raise HTTPException(409, "任务未等待此审批")
+        try:
+            return approval_view(store.approvals.renew(job, body.plan_hash))
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
 
     @app.post("/jobs/{job}/approval")
     async def approve(job: str, body: Decision, principal=Depends(auth)):
-        owned = await job_owner(job, principal)
-        if owned["status"] != "AWAITING_APPROVAL":
+        owned = await approval_job(job, principal)
+        if owned.get("approvalHash") != body.plan_hash or owned["status"] == "CANCELLED":
             raise HTTPException(409, "任务未等待审批")
         try:
-            store.decide(job, body.plan_hash, body.approved)
+            row = store.approval(job, body.plan_hash)
+            if owned["status"] != "AWAITING_APPROVAL" and row["decision"] is None:
+                raise ValueError("任务未等待审批")
+            store.decide(job, body.plan_hash, body.approved, body.approval_nonce, deliver=True)
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
-        await control.user(principal[1], f"/api/agent/jobs/{job}/resume", {})
-        wake(job)
-        return {"accepted": True}
+        delivered = await approval_recovery.deliver(job, body.plan_hash, body.approval_nonce)
+        if delivered and owned["status"] in {"AWAITING_APPROVAL", "QUEUED", "RUNNING"}:
+            wake(job)
+        return {"accepted": True, "resume_pending": not delivered}
 
     class Memory(BaseModel):
         key: str = Field(min_length=1, max_length=80)

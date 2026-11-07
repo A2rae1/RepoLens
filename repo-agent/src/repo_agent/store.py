@@ -1,6 +1,5 @@
 """Application artifacts and cost ledger. LangGraph checkpoints use a separate official saver."""
 
-import hashlib
 import json
 import sqlite3
 import time
@@ -8,6 +7,7 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
+from .approvals import Approvals
 from .pricing import cny_upper
 
 
@@ -69,6 +69,7 @@ class Store:
                     cached_tokens INTEGER,latency_ms REAL,model TEXT NOT NULL,created REAL NOT NULL
                 );
             """)
+        self.approvals = Approvals(self)
 
     @contextmanager
     def connect(self):
@@ -203,29 +204,12 @@ class Store:
             return dict(db.execute("SELECT key,value FROM preferences WHERE owner=?", (owner,)).fetchall())
 
     def propose(self, job: str, plan: dict) -> str:
-        body = json.dumps(plan, sort_keys=True, ensure_ascii=False)
-        plan_hash = hashlib.sha256(body.encode()).hexdigest()
-        with self.connect() as db:
-            db.execute(
-                "INSERT OR IGNORE INTO approvals(job,plan_hash,plan,expires) VALUES(?,?,?,?)",
-                (job, plan_hash, body, time.time() + 1800),
-            )
-        return plan_hash
+        return self.approvals.propose(job, plan)
 
-    def decide(self, job: str, plan_hash: str, approved: bool) -> None:
-        with self.connect() as db:
-            count = db.execute(
-                "UPDATE approvals SET decision=? WHERE job=? AND plan_hash=? AND decision IS NULL AND expires>?",
-                ("APPROVED" if approved else "REJECTED", job, plan_hash, time.time()),
-            ).rowcount
-            if count != 1:
-                raise ValueError("Approval is missing, expired, or already decided")
+    def decide(
+        self, job: str, plan_hash: str, approved: bool, nonce: str = "", *, deliver: bool = False
+    ) -> None:
+        self.approvals.decide(job, plan_hash, approved, nonce, deliver=deliver)
 
     def approval(self, job: str, plan_hash: str) -> dict:
-        with self.connect() as db:
-            row = db.execute(
-                "SELECT * FROM approvals WHERE job=? AND plan_hash=?", (job, plan_hash)
-            ).fetchone()
-        if not row:
-            raise ValueError("Unknown approval")
-        return dict(row)
+        return self.approvals.get(job, plan_hash)

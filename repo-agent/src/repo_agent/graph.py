@@ -29,6 +29,7 @@ class State(TypedDict, total=False):
     outcome: str
     prior_context: str
     citation_aliases: dict[str, str]
+    generation: int
 
 
 def build_graph(
@@ -59,6 +60,7 @@ def build_graph(
             "查询类/函数定义先用find_symbol精确定位。证据已足够就回答，避免反复检索同一内容。\n"
             "符号大小写必须精确匹配，例如command函数不能误答为Command类。"
             "源码行号按返回的编号行逐字抄写，定义完整范围只引用exact_definitions；检索chunk范围不等于完整类/函数范围。"
+            "Java的declaration_candidates只是启发式声明位置，不是精确类型范围；不得由候选行号推断类型结束位置。"
             "检索空结果只说明本次未取到，不能据此断言仓库不存在某目录、文件、功能或政策。"
             "用户只要求提出验证计划时，直接使用propose_validation等待审批，不先无限调查环境。\n"
             f"固定仓库={snapshot['repo']} commit={snapshot['commit_sha']}\n"

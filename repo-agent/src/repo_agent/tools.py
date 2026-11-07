@@ -78,9 +78,11 @@ class Tools:
         args = SCHEMAS[name][0].model_validate_json(raw)
         owner, workspace, snapshot = context["owner"], context["workspace"], context["snapshot"]
         if name == "find_symbol":
+            locations = self.repository.symbol_locations(owner, workspace, snapshot, args.name)
             return {
                 "evidence": self.repository.find_symbol(owner, workspace, snapshot, args.name),
-                "exact_definitions": self.repository.symbol_locations(owner, workspace, snapshot, args.name),
+                "exact_definitions": [item for item in locations if item["precision"] == "exact_ast"],
+                "declaration_candidates": [item for item in locations if item["precision"] != "exact_ast"],
             }
         if name == "search_evidence":
             if self.hybrid:
@@ -110,7 +112,16 @@ class Tools:
                 ).fetchall()
             return {"evidence": [dict(row) for row in rows]}
         if name == "propose_validation":
-            plan = self.executor.plan(context["job"], snapshot, args.recipe)
+            plan = self.executor.plan(context["job"], snapshot, args.recipe, context.get("generation", 0))
             plan_hash = self.store.propose(context["job"], plan)
+            recorded = self.store.approval(context["job"], plan_hash)
+            if recorded["decision"]:
+                return {
+                    "approval_required": False,
+                    "plan_hash": plan_hash,
+                    "decision": recorded["decision"],
+                    "status": "ALREADY_DECIDED",
+                    "reason": "The identical plan was already decided. Do not request it again or infer execution success; use recorded validation results.",
+                }
             return {"approval_required": True, "plan_hash": plan_hash, "plan": plan, "reason": args.reason}
         raise AssertionError("Unreachable tool")
