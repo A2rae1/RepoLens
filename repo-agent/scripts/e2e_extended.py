@@ -20,7 +20,7 @@ import httpx
 
 
 async def main():
-    java, python = "http://127.0.0.1:8090", "http://127.0.0.1:8092"
+    java, python = os.environ.get("CONTROL_API_URL", "http://127.0.0.1:8094"), "http://127.0.0.1:8092"
     output = Path(os.environ.get("E2E_OUTPUT", ".local/e2e_extended.json"))
     facts = {"approval_origin": "engineer_test_harness", "not_user_understanding_acceptance": True}
     run_prefix = os.environ.get("E2E_RUN_PREFIX", "extended-v6")
@@ -29,7 +29,7 @@ async def main():
         async def login(user):
             response = await client.post(
                 java + "/api/auth/login",
-                json={"username": user, "password": os.environ["EVENT_DEMO_PASSWORD"]},
+                json={"username": user, "password": os.environ["REPOLENS_DEMO_PASSWORD"]},
             )
             response.raise_for_status()
             return {"Authorization": "Bearer " + response.json()["accessToken"]}

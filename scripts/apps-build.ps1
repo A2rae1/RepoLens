@@ -26,3 +26,6 @@ try{
  }
  if($LASTEXITCODE-ne0){throw 'Agent image build failed.'}
 }finally{$env:DOCKER_BUILDKIT=$before}
+
+& docker build --build-arg "JAVA_RUNTIME=$($lock['eclipse-temurin:17-jre-jammy'])" -t repolens-control:local (Join-Path $workspace 'repo-control')
+if($LASTEXITCODE-ne0){throw 'RepoLens control image build failed.'}

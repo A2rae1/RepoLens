@@ -7,3 +7,8 @@ try {
  & uv run --project repo-agent --frozen pytest repo-agent/tests -q
  if($LASTEXITCODE-ne0){throw 'Python tests failed.'}
 }finally{Pop-Location}
+
+& mvn -B -ntp -f (Join-Path $workspace 'repo-control/pom.xml') verify
+if($LASTEXITCODE-ne0){throw 'Independent Java control verification failed.'}
+& node --test (Join-Path $workspace 'repo-control/ui-tests/event-stream.test.mjs')
+if($LASTEXITCODE-ne0){throw 'Event stream checks failed.'}

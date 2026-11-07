@@ -17,7 +17,7 @@ import httpx
 
 
 async def main():
-    java = "http://127.0.0.1:8090"
+    java = os.environ.get("CONTROL_API_URL", "http://127.0.0.1:8094")
     agent = "http://127.0.0.1:8092"
     docker = str(Path(os.environ["LOCALAPPDATA"]) / "Programs/DockerDesktop/resources/bin/docker.exe")
     project = os.environ.get("E2E_COMPOSE_PROJECT", "internship-projects")
@@ -26,7 +26,7 @@ async def main():
     async with httpx.AsyncClient(timeout=15) as client:
         response = await client.post(
             java + "/api/auth/login",
-            json={"username": "alice", "password": os.environ["EVENT_DEMO_PASSWORD"]},
+            json={"username": "alice", "password": os.environ["REPOLENS_DEMO_PASSWORD"]},
         )
         response.raise_for_status()
         headers = {"Authorization": "Bearer " + response.json()["accessToken"]}

@@ -17,9 +17,9 @@ class Settings(BaseSettings):
     max_steps: int = Field(default=10, ge=1, le=20)
     request_timeout: float = 45
     checkpoint_url: str = ""
-    es_url: str = "http://127.0.0.1:19200"
-    redis_url: str = "redis://127.0.0.1:16379/1"
-    object_url: str = "http://127.0.0.1:19000"
+    es_url: str = "http://127.0.0.1:19210"
+    redis_url: str = "redis://127.0.0.1:16380/1"
+    object_url: str = "http://127.0.0.1:19010"
     object_access_key: str = "repoagent"
     object_secret_key: str = Field(default="", repr=False)
     object_enabled: bool = False
@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     executor_enabled: bool = False
     executor_work_dir: Path | None = None
     executor_volume: str = Field(default="", pattern=r"^[a-zA-Z0-9_.-]*$")
-    control_url: str = "http://127.0.0.1:8090"
+    control_url: str = "http://127.0.0.1:8094"
     control_token: str = Field(default="", repr=False)
     agent_internal_secret: str = Field(default="", repr=False)
     otlp_endpoint: str = ""

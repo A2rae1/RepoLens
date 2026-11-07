@@ -2,42 +2,36 @@
 
 **开源项目调研与复现 Agent · Evidence-grounded repository research**
 
-A Python Agent service that investigates a fixed GitHub commit, retrieves source evidence, requests approval for constrained checks, and produces traceable reports.
+Submit a public GitHub repository, a full commit SHA and a question. RepoLens retrieves source evidence, produces cited reports, supports follow-up questions and requests approval before constrained Python verification.
 
-**Stack:** Python3.12, FastAPI, LangGraph, DeepSeek, Elasticsearch, MCP, PostgreSQL, S3-compatible storage, Docker.
+## Independent application
 
-## Capabilities
+This repository contains everything specific to RepoLens. It does not require EventFulfill, its API, users, database, frontend, secrets or source checkout.
 
-- Version-pinned snapshots, source citations, BM25/vector/hybrid retrieval comparisons and content/model cache reuse.
-- Persistent checkpoints, leases, cancellation, generation-separated retries and Java completion fencing; approval binds the plan, recipe, image identity and expiry.
-- Non-root, read-only, network-disabled execution recipes with resource/output limits; this is not a strong sandbox for arbitrary malicious code.
-- Scoped Skills, MCP tools, isolated context, resumable S3 uploads, reports and an 80-case development evaluation set with documented limitations.
+- `repo-control/`: Java17/Spring Boot identity, task ownership, idempotency, lease/generation CAS, transactional Outbox/RocketMQ delivery and the standalone web UI.
+- `repo-agent/`: Python3.12/FastAPI/LangGraph worker, retrieval/Skills/MCP, approval, constrained runner, reports and evaluation.
+- `infra/`: this application's own MySQL, Redis, RocketMQ, PostgreSQL, optional Elasticsearch and S3-compatible storage; distinct ports/volumes from other projects.
 
-## Layout and default checks
+**Stack:** Java17, Spring Boot, MyBatis-Plus, MySQL, Redis, RocketMQ; Python3.12, FastAPI, LangGraph, DeepSeek, PostgreSQL, Elasticsearch, MCP, S3-compatible storage, Docker.
 
-`repo-agent/` contains Python source, tests, evaluation, trusted runner and Agent probes. `infra/` contains optional Postgres/search/S3 services; `scripts/` provides Agent-only checks and two-checkout integration.
+## Verify and run
 
 ```powershell
-./scripts/verify.ps1
 ./scripts/init-local.ps1
+./scripts/verify.ps1
+./scripts/executor-build.ps1
+./scripts/apps-build.ps1
+./scripts/apps-start.ps1
+# http://127.0.0.1:8094/
+./scripts/apps-stop.ps1
 ```
 
-Default verification requires Python3.12 and uv; it does not require Java, a live model key or running middleware. Live model calls are disabled by default. Add your own key to ignored `repo-agent/.env` and review the budget before enabling them. Never commit credentials, runtime databases, model weights or logs.
+Default checks require JDK17+, Maven, Python3.12, uv and Node, but no model key or live middleware. Use this repository's generated demo credentials from ignored `infra/.env`; Alice/Bob are researchers, operator has the maintenance role. JWT issuer is `repolens`, separate from any other application.
 
-## Run the Agent and full workflow
+Live calls are disabled in `.env.example`. Put a key only in ignored `repo-agent/.env`, review the cumulative budget, and then opt in. Workers in one deployment must share DATA_DIR and its budget ledger. Never publish credentials, model weights or runtime databases.
 
-The Python API can start independently and exposes its health endpoint on 8092. Full authenticated research jobs, approvals, ownership and the demo UI use the Java task-control API hosted by the separate [EventFulfill](https://github.com/A2rae1/EventFulfill) repository. This HTTP dependency is retained explicitly; the Java project is not duplicated here.
+See [independent deployment](docs/INTEGRATION.md), [separation notes](docs/PROJECT_INDEPENDENCE_2026-11-07.md), [verification scope](docs/VERIFICATION.md) and [third-party notices](docs/THIRD_PARTY_NOTICES.md).
 
-```powershell
-# Clone EventFulfill as a sibling and initialize/start its Java backend first.
-./scripts/agent-start.ps1 -EventFulfillRoot ../EventFulfill
-# http://127.0.0.1:8092/health
-```
+The execution recipes are constrained checks, not arbitrary repository one-click reproduction or a strong sandbox for arbitrary malicious code. Python symbols use AST; Java results are declaration candidates. The 80-case development evaluation is AI-authored and was not a blind generalization benchmark. Historical results retain their original version and scope.
 
-For container integration, build each repository's images and the runner, then use `./scripts/integration.ps1 -EventFulfillRoot ../EventFulfill`. See [integration setup](docs/INTEGRATION.md). Default retrieval is FTS; Elasticsearch/CPU embeddings are optional. Real model acceptance costs money and is separate from default CI.
-
-The evaluation set is AI-authored development material, not blind human evaluation. Simulated/local measurements do not imply production scale or universal repository reproduction. See [verification scope](docs/VERIFICATION.md) and [third-party notices](docs/THIRD_PARTY_NOTICES.md).
-
-## Review fixes
-
-See [reliability fixes](docs/REVIEW_FIXES_2026-11-06.md) for current-read transactions, durable approval delivery, generation-separated retries, evidence precision and versioned evaluation metrics. Rebuild old container images before using this source. See [2026-11-07 verification](docs/FINAL_VERIFICATION_2026-11-07.md) for the rebuilt two-checkout acceptance and remaining boundaries.
+[Independent-deployment verification](docs/INDEPENDENCE_VERIFICATION_2026-11-07.md) records current tests and remaining boundaries.

@@ -18,34 +18,28 @@ ROOT = Path(__file__).resolve().parents[2]
 async def main():
     settings = dict(
         line.split("=", 1)
-        for line in (ROOT / "infra/.env").read_text(encoding="utf-8").splitlines()
+        for line in (ROOT / "repolens-infra/.env" if (ROOT / "repolens-infra/.env").exists() else ROOT / "infra/.env").read_text(encoding="utf-8").splitlines()
         if "=" in line and not line.startswith("#")
     )
     async with httpx.AsyncClient(timeout=8) as client:
         for _ in range(60):
             try:
-                r = await client.get("http://127.0.0.1:8090/actuator/health")
+                r = await client.get("http://127.0.0.1:8094/actuator/health")
                 if r.status_code == 200:
                     break
             except httpx.HTTPError:
                 pass
             await asyncio.sleep(0.5)
         login = await client.post(
-            "http://127.0.0.1:8090/api/auth/login",
-            json={"username": "organizer", "password": settings["EVENT_DEMO_PASSWORD"]},
+            "http://127.0.0.1:8094/api/auth/login",
+            json={"username": "alice", "password": settings["REPOLENS_DEMO_PASSWORD"]},
         )
         login.raise_for_status()
         token = login.json()["accessToken"]
     store = Store(ROOT / "repo-agent/.local")
-    with store.connect() as db:
-        source = dict(
-            db.execute(
-                "SELECT s.repo,s.commit_sha,a.digest FROM snapshots s JOIN snapshot_archives a ON a.snapshot=s.id WHERE s.owner='eval-owner' AND s.commit_sha='934813e4d421071a1b3db3973c02fe2721359a6e' LIMIT 1"
-            ).fetchone()
-        )
-    archive = ROOT / "repo-agent/.local/archives" / (source["digest"] + ".zip")
-    snapshot = Repository(store).ingest(
-        "organizer", "inspector-probe", source["repo"], source["commit_sha"], archive.read_bytes()
+    snapshot = await Repository(store).fetch(
+        "alice", "inspector-probe", "https://github.com/pallets/click",
+        "934813e4d421071a1b3db3973c02fe2721359a6e",
     )
     private = ROOT / "repo-agent/.local" / ("mcp-inspector-auth-" + uuid.uuid4().hex + ".json")
     private.write_text(json.dumps({"token": token}), encoding="utf-8")
@@ -103,8 +97,8 @@ async def main():
             "client": "Official Inspector1.0.4 CLI, security-fixes-only v1 line; installed Node24.15 does not meet current v2.14 floor",
             "tools_discovered": 3,
             "real_java_auth": True,
-            "public_source": source["repo"],
-            "commit": source["commit_sha"],
+            "public_source": snapshot["repo"],
+            "commit": snapshot["commit_sha"],
             "owner_search": True,
             "other_workspace_denied": True,
             "temporary_auth_file_removed_on_exit": True,

@@ -16,7 +16,7 @@ if (
 data = json.loads(p.read_text(encoding="utf-8"))
 os.environ["MCP_AUTH_TOKEN"] = data["token"]
 os.environ["DATA_DIR"] = str(ROOT / "repo-agent/.local")
-os.environ["CONTROL_URL"] = "http://127.0.0.1:8090"
+os.environ["CONTROL_URL"] = "http://127.0.0.1:8094"
 sys.path.insert(0, str(ROOT / "repo-agent/src"))
 os.chdir(ROOT / "repo-agent")
 from repo_agent.mcp_server import create_server  # noqa: E402

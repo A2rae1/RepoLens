@@ -34,7 +34,7 @@ async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--live", action="store_true")
     args = parser.parse_args()
-    java = "http://127.0.0.1:8090"
+    java = "http://127.0.0.1:8094"
     async with httpx.AsyncClient(timeout=15) as client:
         for _ in range(90):
             try:
@@ -46,7 +46,7 @@ async def main():
             await asyncio.sleep(1)
         response = await client.post(
             java + "/api/auth/login",
-            json={"username": "alice", "password": os.environ["EVENT_DEMO_PASSWORD"]},
+            json={"username": "alice", "password": os.environ["REPOLENS_DEMO_PASSWORD"]},
         )
         response.raise_for_status()
         headers = {"Authorization": "Bearer " + response.json()["accessToken"]}
@@ -96,7 +96,7 @@ async def main():
                 services, spans = services_and_spans(response.json())
                 names = {s["name"] for s in spans}
                 if (
-                    {"event-fulfill", "repo-agent"} <= services
+                    {"repolens-control", "repo-agent"} <= services
                     and "repo.fetch" in names
                     and "agent.job" in names
                     and "mq.consume" in names
@@ -107,7 +107,7 @@ async def main():
                 ):
                     break
             await asyncio.sleep(1)
-        assert {"event-fulfill", "repo-agent"} <= services, sorted(services)
+        assert {"repolens-control", "repo-agent"} <= services, sorted(services)
         failed = [
             s
             for s in spans

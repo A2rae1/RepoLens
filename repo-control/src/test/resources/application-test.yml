@@ -1,0 +1,11 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:repolens;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE
+    username: sa
+    password: ''
+    driver-class-name: org.h2.Driver
+app:
+  jwt-secret: test-repolens-0123456789abcdef0123456789
+  demo-users: false
+  redis-enabled: false
+  messaging: disabled

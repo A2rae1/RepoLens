@@ -1,12 +1,34 @@
 services:
+  control:
+    image: repolens-control:local
+    init: true
+    stop_grace_period: 30s
+    environment:
+      REPOLENS_DB_URL: jdbc:mysql://mysql:3306/repolens?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true
+      REPOLENS_DB_PASSWORD: ${REPOLENS_DB_PASSWORD}
+      REPOLENS_JWT_SECRET: ${REPOLENS_JWT_SECRET}
+      REPOLENS_DEMO_USERS: 'true'
+      REPOLENS_DEMO_PASSWORD: ${REPOLENS_DEMO_PASSWORD}
+      REPOLENS_MESSAGING: rocketmq
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+      ROCKETMQ_NAMESRV: namesrv:9876
+      APP_AGENT_URL: http://repo-agent:8092
+      AGENT_INTERNAL_SECRET: ${AGENT_INTERNAL_SECRET}
+    ports: ["127.0.0.1:8094:8094"]
+    depends_on:
+      mysql: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      broker: {condition: service_started}
+    mem_limit: 384m
   repo-agent:
     image: repolens:local
     init: true
     stop_grace_period: 30s
-    env_file: ${REPOLENS_ROOT:?Set RepoLens checkout path}/repo-agent/.env
+    env_file: ../repo-agent/.env
     environment:
       DATA_DIR: /app/.local
-      CONTROL_URL: http://event-app:8090
+      CONTROL_URL: http://control:8094
       AGENT_INTERNAL_SECRET: ${AGENT_INTERNAL_SECRET}
       CHECKPOINT_URL: postgresql://repoagent:${AGENT_CHECKPOINT_PASSWORD}@postgres:5432/repoagent
       OBJECT_URL: http://objectstore:9000
@@ -15,21 +37,16 @@ services:
       SEARCH_BACKEND: fts
       EXECUTOR_ENABLED: 'true'
       EXECUTOR_WORK_DIR: /runner-work
-      EXECUTOR_VOLUME: ${REPOLENS_RUNNER_VOLUME:-internship-projects_runner_work}
+      EXECUTOR_VOLUME: ${REPOLENS_RUNNER_VOLUME:-repolens_runner_work}
     volumes:
-    - ${REPOLENS_ROOT}/repo-agent/.local:/app/.local
+    - ../repo-agent/.local:/app/.local
     - runner_work:/runner-work
     - /var/run/docker.sock:/var/run/docker.sock
-    ports:
-    - 127.0.0.1:8092:8092
+    ports: ["127.0.0.1:8092:8092"]
     depends_on:
-      postgres:
-        condition: service_healthy
-      objectstore:
-        condition: service_started
+      postgres: {condition: service_healthy}
+      objectstore: {condition: service_started}
     mem_limit: 320m
-    cpus: 1
-    restart: on-failure:3
 volumes:
   runner_work:
-    name: ${REPOLENS_RUNNER_VOLUME:-internship-projects_runner_work}
+    name: ${REPOLENS_RUNNER_VOLUME:-repolens_runner_work}

@@ -1,141 +1,78 @@
-"""Real Java control-plane queue load, worker stopped and all created jobs cancelled: no LLM calls."""
+"""Independent task-queue k6 probe; stops only the selected project's worker before enqueueing."""
 
-import asyncio
 import json
 import os
-import time
+import re
+import shutil
+import subprocess
 import uuid
+from pathlib import Path
 
 import httpx
-from jobs_init import DOCKER, ROOT, sql
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
-async def main():
+def main():
+    project = os.environ.get("E2E_COMPOSE_PROJECT", "repolens")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,40}", project):
+        raise ValueError("Invalid explicit project name")
+    k6 = os.environ.get("K6_EXECUTABLE") or shutil.which("k6")
+    if not k6 or not Path(k6).is_file():
+        raise RuntimeError("Set K6_EXECUTABLE to your own installed k6 before this optional probe")
+    docker = os.environ.get("DOCKER_EXECUTABLE", "docker")
+    container = project + "-repo-agent-1"
+
+    def owned_command(*args):
+        result = subprocess.run([docker, *args], capture_output=True, timeout=35)
+        if result.returncode:
+            raise RuntimeError("Own worker lifecycle check failed; credentials/output omitted")
+        return result.stdout
+
+    labels = json.loads(owned_command("inspect", container, "--format", "{{json .Config.Labels}}"))
+    assert labels["com.docker.compose.project"] == project
+    assert labels["com.docker.compose.service"] == "repo-agent"
+    origin = os.environ.get("CONTROL_API_URL", "http://127.0.0.1:8094")
+    run = "queue-" + uuid.uuid4().hex
+    directory = ROOT / ".local/load" / run
+    directory.mkdir(parents=True)
+    config_root = ROOT / "repolens-infra" if (ROOT / "repolens-infra").exists() else ROOT / "infra"
     settings = dict(
         line.split("=", 1)
-        for line in (ROOT / "infra/.env").read_text(encoding="utf-8").splitlines()
+        for line in (config_root / ".env").read_text(encoding="utf-8-sig").splitlines()
         if "=" in line and not line.startswith("#")
     )
-    proc = await asyncio.create_subprocess_exec(
-        str(DOCKER),
-        "ps",
-        "-q",
-        "--filter",
-        "name=^internship-projects-repo-agent-1$",
-        stdout=asyncio.subprocess.PIPE,
-    )
-    out, _ = await proc.communicate()
-    assert not out.strip(), "Own worker must be stopped for this queue-only experiment"
-    run = "agent-load-" + uuid.uuid4().hex[:12]
-    directory = ROOT / ".local/agent-load" / run
-    directory.mkdir(parents=True)
-    ledger_before = None
-    import sqlite3
+    with httpx.Client(timeout=15) as client:
+        login = client.post(origin + "/api/auth/login", json={"username": "alice", "password": settings["REPOLENS_DEMO_PASSWORD"]})
+        login.raise_for_status()
+        headers = {"Authorization": "Bearer " + login.json()["accessToken"]}
 
-    with sqlite3.connect(ROOT / "repo-agent/.local/artifacts.sqlite3") as db:
-        ledger_before = db.execute("SELECT COUNT(*) FROM model_calls").fetchone()[0]
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.post(
-            "http://127.0.0.1:8090/api/auth/login",
-            json={"username": "organizer", "password": settings["EVENT_DEMO_PASSWORD"]},
-        )
-        r.raise_for_status()
-        token = r.json()["accessToken"]
-        headers = {"Authorization": "Bearer " + token}
-        r = await client.post(
-            "http://127.0.0.1:8090/api/agent/workspaces", headers=headers, json={"name": run}
-        )
-        r.raise_for_status()
-        workspace = r.json()["id"]
+        def api(method, path, data=None):
+            result = client.request(method, origin + path, headers=headers, json=data)
+            result.raise_for_status()
+            return result.json()
+
+        workspace = api("POST", "/api/agent/workspaces", {"name": run})["id"]
         private = directory / "private-input.json"
-        private.write_text(
-            json.dumps(
-                {"token": token, "run": run, "workspace": workspace, "origin": "http://127.0.0.1:8090"}
-            ),
-            encoding="utf-8",
-        )
-        output = directory / "summary.json"
-        env = os.environ | {
-            "LOAD_INPUT": str(private),
-            "LOAD_OUTPUT": str(output),
-            "K6_NO_USAGE_REPORT": "true",
-        }
-        k6 = next((ROOT / ".local/tools/k6").rglob("k6.exe"))
-        stop = asyncio.Event()
-        samples = []
-
-        async def sample():
-            while not stop.is_set():
-                p = await asyncio.create_subprocess_exec(
-                    str(DOCKER),
-                    "stats",
-                    "--no-stream",
-                    "--format",
-                    "{{json .}}",
-                    "internship-projects-event-app-1",
-                    "internship-projects-mysql-1",
-                    "internship-projects-broker-1",
-                    "internship-projects-redis-1",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.DEVNULL,
-                )
-                raw, _ = await p.communicate()
-                for line in raw.decode().splitlines():
-                    samples.append({"time_monotonic": round(time.monotonic(), 3), **json.loads(line)})
-                await asyncio.sleep(0.5)
-
-        sampler = asyncio.create_task(sample())
+        private.write_text(json.dumps({"origin": origin, "workspace": workspace, "token": login.json()["accessToken"], "run": run}), encoding="utf-8")
+        owned_command("stop", "--timeout", "20", container)
+        completed = None
         try:
-            with (directory / "k6.log").open("wb") as log:
-                process = await asyncio.create_subprocess_exec(
-                    str(k6),
-                    "run",
-                    "--no-usage-report",
-                    str(ROOT / "event-platform/load/agent-queue.js"),
-                    env=env,
-                    stdout=log,
-                    stderr=log,
-                )
-                assert await process.wait() == 0
+            completed = subprocess.run([k6, "run", "--quiet", "--env", "LOAD_INPUT=" + str(private), "--env", "LOAD_OUTPUT=" + str(directory / "k6.json"), str(ROOT / "repo-control/load/agent-queue.js")], capture_output=True, timeout=110)
         finally:
-            stop.set()
-            await sampler
-        persisted = await sql(
-            f"SELECT COUNT(*) FROM eventfulfill_docker.agent_job WHERE workspace_id='{workspace}';"
-        )
-        assert persisted == "40", persisted
-        jobs = await sql(f"SELECT id FROM eventfulfill_docker.agent_job WHERE workspace_id='{workspace}';")
-        for job in jobs.splitlines():
-            r = await client.post("http://127.0.0.1:8090/api/agent/jobs/" + job + "/cancel", headers=headers)
-            r.raise_for_status()
-            assert r.json()["status"] == "CANCELLED"
-        with sqlite3.connect(ROOT / "repo-agent/.local/artifacts.sqlite3") as db:
-            ledger_after = db.execute("SELECT COUNT(*) FROM model_calls").fetchone()[0]
-        assert ledger_before == ledger_after
-        metrics = json.loads(output.read_text(encoding="utf-8"))["metrics"]
-        result = {
-            "status": "PASS",
-            "run": run,
-            "vus": 20,
-            "iterations": 200,
-            "http_attempts": 400,
-            "unique_keys_persisted": 40,
-            "all_fixture_jobs_cancelled": True,
-            "model_calls_added": 0,
-            "checks": metrics["checks"]["values"],
-            "http_error_rate": metrics["http_req_failed"]["values"]["rate"],
-            "idempotency_conflicts": metrics.get("idempotency_conflicts", {})
-            .get("values", {})
-            .get("count", 0),
-            "duration_ms": metrics["http_req_duration"]["values"],
-            "sampled_resources": samples,
-            "limits": "Queue/idempotency/cancel control plane only; Python worker deliberately stopped, does not measure Agent completion throughput or capacity ceiling. Docker stats are coarse samples, not a proven resource peak; conflicts are expected concurrent idempotency outcomes.",
-        }
-        (ROOT / "repo-agent/.local/agent_load_probe.json").write_text(
-            json.dumps(result, indent=2), encoding="utf-8"
-        )
-        print(json.dumps({k: v for k, v in result.items() if k != "sampled_resources"}))
+            jobs = [j for j in api("GET", "/api/agent/jobs") if j["workspaceId"] == workspace]
+            for job in jobs:
+                assert api("POST", "/api/agent/jobs/" + job["id"] + "/cancel", {})["status"] == "CANCELLED"
+            private.unlink(missing_ok=True)
+            # Never restart a worker before confirming that this probe's queued work is cancelled.
+            assert all(j["status"] == "CANCELLED" for j in api("GET", "/api/agent/jobs") if j["workspaceId"] == workspace)
+            owned_command("start", container)
+        assert completed is not None and completed.returncode == 0, "k6 thresholds failed; raw bounded metrics retained"
+        assert len(jobs) == len({j["idemKey"] for j in jobs}) == 40
+        result = {"status": "PASS", "distinct_tasks": 40, "all_cancelled_before_worker_restart": True, "model_calls": 0, "scope": "20VU/400POST task enqueue only; independent control API, not Agent completion throughput"}
+        (directory / "summary.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+        print(json.dumps(result))
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

@@ -9,7 +9,7 @@ import httpx
 
 
 async def main():
-    java = "http://127.0.0.1:8090"
+    java = os.environ.get("CONTROL_API_URL", "http://127.0.0.1:8094")
     summary = json.loads(Path(".local/e2e_extended.json").read_text(encoding="utf-8"))
     job = summary["followup_job"]
     async with httpx.AsyncClient(timeout=15) as client:
@@ -17,7 +17,7 @@ async def main():
         async def login(user):
             response = await client.post(
                 java + "/api/auth/login",
-                json={"username": user, "password": os.environ["EVENT_DEMO_PASSWORD"]},
+                json={"username": user, "password": os.environ["REPOLENS_DEMO_PASSWORD"]},
             )
             response.raise_for_status()
             return {"Authorization": "Bearer " + response.json()["accessToken"]}

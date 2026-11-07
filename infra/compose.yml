@@ -1,5 +1,51 @@
-name: repolens-services
+name: repolens
 services:
+  mysql:
+    image: mysql:8.4.9
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Run init-local}
+      MYSQL_DATABASE: repolens
+      MYSQL_USER: repolens
+      MYSQL_PASSWORD: ${REPOLENS_DB_PASSWORD:?Run init-local}
+    ports: ["127.0.0.1:13407:3306"]
+    volumes: ["control_mysql:/var/lib/mysql"]
+    mem_limit: 600m
+    healthcheck:
+      test: ["CMD-SHELL", 'MYSQL_PWD=$$MYSQL_ROOT_PASSWORD mysqladmin ping -h 127.0.0.1 --silent']
+      interval: 5s
+      retries: 35
+  redis:
+    image: redis:7.4.2-alpine
+    ports: ["127.0.0.1:16380:6379"]
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes: ["control_redis:/data"]
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 20
+  namesrv:
+    image: apache/rocketmq:5.3.2
+    command: sh mqnamesrv
+    environment: {JAVA_OPT_EXT: "-Xms128m -Xmx128m -Xmn64m"}
+    ports: ["127.0.0.1:19877:9876"]
+    mem_limit: 256m
+  broker-init:
+    image: apache/rocketmq:5.3.2
+    user: "0:0"
+    command: ["sh", "-c", "mkdir -p /home/rocketmq/store/config && chown -R rocketmq:rocketmq /home/rocketmq/store"]
+    volumes: ["control_mq:/home/rocketmq/store"]
+    mem_limit: 64m
+  broker:
+    image: apache/rocketmq:5.3.2
+    command: sh mqbroker -n namesrv:9876 -c /home/rocketmq/broker.conf
+    environment: {JAVA_OPT_EXT: "-Xms192m -Xmx192m -Xmn64m -XX:MaxDirectMemorySize=96m"}
+    ports: ["127.0.0.1:11911:10911", "127.0.0.1:11909:10909", "127.0.0.1:11912:10912"]
+    volumes: ["./rocketmq/broker.conf:/home/rocketmq/broker.conf:ro", "control_mq:/home/rocketmq/store"]
+    depends_on:
+      namesrv: {condition: service_started}
+      broker-init: {condition: service_completed_successfully}
+    mem_limit: 512m
   postgres:
     image: postgres:17.4-alpine
     environment:
@@ -7,7 +53,7 @@ services:
       POSTGRES_PASSWORD: ${AGENT_CHECKPOINT_PASSWORD:?Run init-local first}
       POSTGRES_DB: repoagent
     ports:
-    - 127.0.0.1:15432:5432
+    - 127.0.0.1:15433:5432
     volumes:
     - agent_postgres:/var/lib/postgresql/data
     mem_limit: 256m
@@ -26,7 +72,7 @@ services:
       node.store.allow_mmap: 'false'
       ES_JAVA_OPTS: -Xms512m -Xmx512m
     ports:
-    - 127.0.0.1:19200:9200
+    - 127.0.0.1:19210:9200
     volumes:
     - agent_search:/usr/share/elasticsearch/data
     mem_limit: 1200m
@@ -41,12 +87,15 @@ services:
       RUSTFS_CONSOLE_ENABLE: 'true'
       RUSTFS_OBS_LOGGER_LEVEL: warn
     ports:
-    - 127.0.0.1:19000:9000
-    - 127.0.0.1:19001:9001
+    - 127.0.0.1:19010:9000
+    - 127.0.0.1:19011:9001
     volumes:
     - agent_objects:/data
     mem_limit: 512m
 volumes:
+  control_mysql: null
+  control_redis: null
+  control_mq: null
   agent_postgres: null
   agent_search: null
   agent_objects: null

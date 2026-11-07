@@ -1,0 +1,52 @@
+server:
+  port: ${PORT:8094}
+  error:
+    include-message: never
+spring:
+  application:
+    name: repolens-control
+  datasource:
+    url: ${REPOLENS_DB_URL:jdbc:mysql://127.0.0.1:13407/repolens?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true}
+    username: ${REPOLENS_DB_USER:repolens}
+    password: ${REPOLENS_DB_PASSWORD}
+    hikari:
+      maximum-pool-size: 12
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:16380}
+      timeout: 500ms
+  jackson:
+    time-zone: UTC
+  flyway:
+    enabled: true
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    arg-name-based-constructor-auto-mapping: true
+management:
+  tracing:
+    sampling:
+      probability: ${TRACE_SAMPLE_RATE:1.0}
+    propagation:
+      type: W3C
+  otlp:
+    tracing:
+      endpoint: ${OTEL_HTTP_ENDPOINT:http://127.0.0.1:44318/v1/traces}
+      timeout: 3s
+      connect-timeout: 2s
+      export:
+        enabled: ${OTEL_EXPORT_ENABLED:false}
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      show-details: never
+app:
+  jwt-secret: ${REPOLENS_JWT_SECRET}
+  demo-users: ${REPOLENS_DEMO_USERS:false}
+  demo-password: ${REPOLENS_DEMO_PASSWORD:}
+  redis-enabled: ${REPOLENS_REDIS_ENABLED:true}
+  messaging: ${REPOLENS_MESSAGING:local}

@@ -4,9 +4,9 @@
 
 ## 启动
 
-见工作区`docs/INTEGRATION.md`。`uv sync --frozen`安装主依赖，密钥只放本目录.env（公共例子.env.example），LIVE_MODEL_ENABLED默认false。累计300元硬上限，预算预留含失败不确定调用，不能当账单。日常Compose镜像默认FTS；真实ES/向量专项使用`uv sync --extra embedding --frozen`和原生`agent-start.ps1 -Search`，不要声称基础镜像已包含Embedding模型。
+见工作区`项目八股/运行与故障恢复.md`。`uv sync --frozen`安装主依赖，密钥只放本目录.env（公共例子.env.example），LIVE_MODEL_ENABLED默认false。累计300元硬上限，预算预留含失败不确定调用，不能当账单。日常Compose镜像默认FTS；真实ES/向量专项使用`uv sync --extra embedding --frozen`和原生`agent-start.ps1 -Search`，不要声称基础镜像已包含Embedding模型。
 
-`uv run pytest -q`只收集本工程tests；真实依赖条件跳过另列。`uv run ruff check src tests scripts evaluation`检查源码。跨服务实测用工作区agent-e2e脚本，真实付费、工程审批与本人学习验收分开。Exact依赖见uv.lock，来源版本与许可见`docs/THIRD_PARTY_NOTICES.md`。
+`uv run pytest -q`只收集本工程tests；真实依赖条件跳过另列。`uv run ruff check src tests scripts evaluation`检查源码。跨服务实测用工作区agent-e2e脚本，真实付费、工程审批与本人学习验收分开。Exact依赖见uv.lock，来源版本与许可见`项目八股/开源来源与版本.md`。
 
 ## 已实现的边界
 
@@ -23,4 +23,4 @@
 
 40查询检索对比BM25 Recall@5=.775、hybrid=.6375、rerank=.75（单仓库/AI路径标签），不宣称融合必优。固定Click受限完整pytest实测628PASS/21SKIP/1XFAIL，AST_OK只代表语法检查，不代表兼容所有Python版本或复现所有仓库。
 
-开发验证范围见docs/VERIFICATION.md；运行数据保存在本机.local，不随源码发布。源代码由AI实现并复用框架，不冒领上游能力，
+详细原始失败、成本、Token和版本hash在工作区证据与本机.local；源代码由AI实现并复用框架，不冒领上游能力，本人理解另验收。

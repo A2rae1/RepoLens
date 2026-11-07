@@ -1,33 +1,20 @@
-# Two-repository integration
+# Independent deployment
 
-The two repositories have separate source trees, tests and CI. The existing Java identity/task control plane lives in EventFulfill; RepoLens calls it over HTTP. This split changes repository packaging and startup paths, not the business protocol.
+EventFulfill and RepoLens are separate applications. Each checkout supplies its own source, build, secrets, identity, frontend, database configuration and lifecycle scripts. No sibling checkout is required.
 
-```text
-parent/
-  EventFulfill/event-platform/  Java booking and task-control service
-  RepoLens/repo-agent/          Python Agent worker
-```
+| Application | Web/API | Worker | MySQL | Redis | MQ nameserver | Postgres | S3 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| EventFulfill |8090|—|13406|16379|19876|—|—|
+| RepoLens |8094|8092|13407|16380|19877|15433|19010/19011|
 
-## Native workflow
+RepoLens Elasticsearch is optional on19210. Bindings are localhost only. Do not start every optional group on a small machine merely because ports differ.
 
-1. Clone both repositories side by side.
-2. In EventFulfill run `./scripts/init-local.ps1`, `./scripts/verify.ps1` and `./scripts/runtime.ps1 -Group core`. Then run `./scripts/event-start.ps1` in a long-running terminal.
-3. In RepoLens run `./scripts/init-local.ps1`, then `./scripts/agent-start.ps1 -EventFulfillRoot ../EventFulfill`. The startup process reads only the generated shared Agent secret from the specified Java checkout, without printing it.
-4. Open http://127.0.0.1:8090/ for the UI. Java health is 8090/actuator/health; Agent health is 8092/health. Use generated local demo credentials.
+In each repository run `scripts/init-local.ps1`, then `scripts/verify.ps1` and `scripts/apps-build.ps1`. RepoLens additionally requires `scripts/executor-build.ps1`. Start/stop each independently using `scripts/apps-start.ps1` / `scripts/apps-stop.ps1`.
 
-## Container workflow
+Both accept an explicit `-ProjectName` (defaults `eventfulfill` or `repolens`). Keep the same name for stop. Volumes are retained. Startup waits for application health. RepoLens `integration.ps1` is now an alias for its own complete stack; it has no EventFulfillRoot parameter. `agent-e2e.ps1` likewise uses RepoLens credentials and8094.
 
-1. Build EventFulfill after Java verification: `./scripts/apps-build.ps1`.
-2. In RepoLens: `./scripts/init-local.ps1`, `./scripts/executor-build.ps1`, `./scripts/apps-build.ps1`.
-3. Stop native application processes first, then run `./scripts/integration.ps1 -EventFulfillRoot ../EventFulfill` in RepoLens. It combines both Compose definitions under the default dedicated internship-projects project name and initializes only that application's schema. It waits for both applications to become healthy. Use `-ProjectName your-local-name` to select a separate set of containers, data volumes and runner volume; host ports are still shared, so only one group can run at a time.
-4. Stop with the same command plus `-Stop`; data volumes are retained. Do not run multiple checkouts of this same application at once, or stack optional search/governance/K8s groups on a resource-constrained machine.
+RepoLens native mode: start its own middleware, run `scripts/control-start.ps1`, then `scripts/agent-start.ps1 -Postgres` in separate terminals. MySQL/Redis/MQ are this repository's own services. The control service's default local adapter is durable HTTP delivery, explicitly different from the RocketMQ container profile.
 
-The integration script creates an ignored `.local/integration-PROJECT.env` from the two generated local configurations; no credentials are included in Git. Model API keys stay in RepoLens/repo-agent/.env, with live calls disabled by default. Default CI checks each repository separately and does not start a paid model or full container deployment. An explicitly selected `-OverrideFile path/to/local.yml` can supply local acceptance settings; keep private overrides out of Git. Use the identical project name/override for stop commands. `agent-e2e.ps1 -RestartProbe` also accepts `-ProjectName` and restarts only that group's Agent.
+The Agent image may reuse an immutable local runtime only when uv.lock and pyproject.toml hashes exactly match; old source is removed before replacement. `-RefreshDependencies` forces the pinned clean dependency build; `-ClassicBuilder` selects the classic builder. Neither disables checksum verification.
 
-## Building in a constrained local environment
-
-`apps-build.ps1` reuses an existing immutable local runtime image only when its `uv.lock` and `pyproject.toml` hashes match this checkout exactly. It removes the previous source before copying the new source. `-RefreshDependencies` forces the original pinned dependency build; `-ClassicBuilder` selects the classic local builder when BuildKit bootstrap is unavailable. Failed dependency checksums are never bypassed. Local reuse is a code rebuild, not proof that a clean dependency download succeeded.
-
-All worker processes for the same deployment must share the same local DATA_DIR. The per-job OS file lock prevents simultaneous graph writers on the tested single-host/shared-bind deployment; separate data directories, cross-host workers and distributed filesystems are not supported by that lock. Do not delete its lock files while workers run.
-
-See [current verification](FINAL_VERIFICATION_2026-11-07.md) for the rebuilt two-checkout deployment and its limits. Historical quality/performance measurements remain tied to their original versions.
+All workers in a RepoLens deployment must share DATA_DIR, including metadata, budget and per-job OS locks. This is single-host coordination, not a cross-host/distributed-filesystem lock. A clean second checkout must use its own generated credentials and data; old combined-version databases remain preserved rather than silently copied or reset.

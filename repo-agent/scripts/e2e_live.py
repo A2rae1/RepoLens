@@ -13,11 +13,11 @@ import httpx
 
 
 async def main():
-    java, agent = "http://127.0.0.1:8090", "http://127.0.0.1:8092"
+    java, agent = os.environ.get("CONTROL_API_URL", "http://127.0.0.1:8094"), "http://127.0.0.1:8092"
     async with httpx.AsyncClient(timeout=15) as client:
         login = await client.post(
             java + "/api/auth/login",
-            json={"username": "alice", "password": os.environ["EVENT_DEMO_PASSWORD"]},
+            json={"username": "alice", "password": os.environ["REPOLENS_DEMO_PASSWORD"]},
         )
         login.raise_for_status()
         headers = {"Authorization": "Bearer " + login.json()["accessToken"]}
@@ -61,7 +61,7 @@ async def main():
         assert report["citations"] and "3.7" in report["answer"] and "flit" in report["answer"].lower()
         # Verify horizontal isolation with a separately authenticated account.
         other = await client.post(
-            java + "/api/auth/login", json={"username": "bob", "password": os.environ["EVENT_DEMO_PASSWORD"]}
+            java + "/api/auth/login", json={"username": "bob", "password": os.environ["REPOLENS_DEMO_PASSWORD"]}
         )
         other.raise_for_status()
         forbidden = await client.get(

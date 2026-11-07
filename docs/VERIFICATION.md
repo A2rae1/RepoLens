@@ -1,3 +1,7 @@
+> Current standalone results: [independent verification](INDEPENDENCE_VERIFICATION_2026-11-07.md).
+
+> Current architecture: [independent applications](PROJECT_INDEPENDENCE_2026-11-07.md). Earlier combined-deployment results below are historical, not proof of the new split.
+
 > Current repair validation: [2026-11-07 closeout](FINAL_VERIFICATION_2026-11-07.md). Earlier results below retain their original version/scope.
 
 # Verification scope
